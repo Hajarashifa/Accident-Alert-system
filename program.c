@@ -1,61 +1,108 @@
 #include <SoftwareSerial.h>
 
-#define TRIG_PIN 9
-#define ECHO_PIN 10
+// Create software serial object to communicate with SIM800L
+SoftwareSerial mySerial(3, 2); // SIM800L Tx & Rx is connected to Arduino #3 & #2
 
-#define GSM_TX 7
-#define GSM_RX 8
+#define trigPin 4
+#define echoPin 5
+#define alarmPin 6
 
-SoftwareSerial gsmSerial(GSM_TX, GSM_RX);  
+const String PHONE_NUMBER = "+916209403151"; // Replace with recipient number
 
-long duration;
-int distance;
+void setup()
+{
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(alarmPin, OUTPUT);
 
-void setup() {
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
+  // Begin serial communication with Arduino and Arduino IDE (Serial Monitor)
+  Serial.begin(9600);
+ 
+  // Begin serial communication with Arduino and SIM800L
+  mySerial.begin(9600);
 
-  Serial.begin(9600);          
-  gsmSerial.begin(9600);       
-
+  Serial.println("Initializing...");
   delay(1000);
-  sendSMS("System Ready: Accident Alert Activated");
+
+  sendATCommand("AT"); // Once the handshake test is successful, it will return OK
+  sendATCommand("AT+CMGF=1"); // Configuring TEXT mode
 }
 
-void loop() {
-  distance = getDistance();
-
-  Serial.print("Distance: ");
-  Serial.print(distance);
-  Serial.println(" cm");
-
-  if (distance <= 10) { 
-    sendSMS("Alert: Possible accident detected! Immediate attention needed.");
-    delay(10000); 
+void loop()
+{
+  while (mySerial.available())
+  {
+    Serial.write(mySerial.read()); // Print the response from the module
   }
 
-  delay(1000);
-}
-
-int getDistance() {
-  digitalWrite(TRIG_PIN, LOW);
+  long time_duration, distance_in_cm;
+  digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-
-  digitalWrite(TRIG_PIN, HIGH);
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  digitalWrite(trigPin, LOW);
+  time_duration = pulseIn(echoPin, HIGH);
+  distance_in_cm = time_duration / 29 / 2;
 
-  duration = pulseIn(ECHO_PIN, HIGH);
-  return duration * 0.034 / 2; 
+  Serial.print("Distance: ");
+  Serial.print(distance_in_cm);
+  Serial.println(" cm");
+
+  if (distance_in_cm <= 10)
+  {
+    Serial.println("Intruder detected!");
+    activateAlarm();
+    sendSMS(PHONE_NUMBER, "Intruder detected!"); // Send SMS
+    makeCall(PHONE_NUMBER); // Make a call
+    delay(5000); // Delay to prevent continuous triggering
+  }
+  else
+  {
+    deactivateAlarm();
+  }
+
+  delay(500);
 }
 
-void sendSMS(String message) {
-  gsmSerial.println("AT+CMGF=1"); // Set SMS mode
-  delay(1000);
-  gsmSerial.println("AT+CMGS=\"+918610585730\""); 
-  delay(1000);
-  gsmSerial.print(message);
+void sendATCommand(const String& command)
+{
+  mySerial.println(command);
   delay(500);
-  gsmSerial.write(26); 
+
+  while (mySerial.available())
+  {
+    Serial.write(mySerial.read()); // Print the response from the module
+  }
+}
+
+void sendSMS(const String& phoneNumber, const String& message)
+{
+  mySerial.println("AT+CMGS=\"" + phoneNumber + "\"");
+  delay(1000);
+  mySerial.println(message);
+  delay(1000);
+  mySerial.write(26); // Send Ctrl+Z character to indicate the end of the message
   delay(5000);
+
+  while (mySerial.available())
+  {
+    Serial.write(mySerial.read()); // Print the response from the module
+  }
+}
+
+void makeCall(const String& phoneNumber)
+{
+  mySerial.println("ATD" + phoneNumber + ";");
+  delay(10000); // Delay for the call to connect (adjust as needed)
+  mySerial.println("ATH"); // Hang up the call
+}
+
+void activateAlarm()
+{
+  digitalWrite(alarmPin, HIGH);
+}
+
+void deactivateAlarm()
+{
+  digitalWrite(alarmPin, LOW);
 }
